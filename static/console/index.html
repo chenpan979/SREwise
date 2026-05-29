@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SREwise · 多 Agent SRE 控制台</title>
+  <meta name="description" content="多 Agent + Knowledge Graph + GraphRAG + Human-in-the-Loop 的智能 SRE 故障诊断系统" />
+  <link rel="stylesheet" href="/static/console/styles.css" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js" defer></script>
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部 App Bar -->
+    <header class="app-bar">
+      <div class="app-bar-left">
+        <div class="brand">
+          <svg class="brand-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="gx" x1="0" y1="0" x2="32" y2="32">
+                <stop offset="0" stop-color="#7c5cff"/>
+                <stop offset="1" stop-color="#22d3ee"/>
+              </linearGradient>
+            </defs>
+            <rect x="2" y="2" width="28" height="28" rx="7" fill="url(#gx)"/>
+            <path d="M10 19c1.4 1.5 3.2 2.4 5.8 2.4 3.4 0 5.6-1.6 5.6-4 0-2.1-1.5-3.3-4.5-3.9l-1.7-.4c-1.5-.3-2.2-.8-2.2-1.6 0-.9.9-1.5 2.4-1.5 1.6 0 2.7.7 3.5 1.9l2.4-1.6c-1.1-1.9-3.1-3-5.9-3-3.2 0-5.4 1.5-5.4 3.8 0 2 1.5 3.3 4.4 3.9l1.7.4c1.5.3 2.2.8 2.2 1.7 0 1-1 1.6-2.6 1.6-1.9 0-3.2-.8-4.1-2.3L10 19z" fill="#0b1020"/>
+          </svg>
+          <div class="brand-text">
+            <span class="brand-name">SREwise</span>
+            <span class="brand-tag">multi-agent SRE</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="app-bar-center">
+        <div class="search" role="search" id="globalSearch">
+          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="m21 21-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <input id="globalSearchInput" type="search" placeholder="搜索故障 / runbook,或输入 g 跳页 (g d/i/k/r/e)" aria-label="搜索"/>
+          <kbd>⌘ K</kbd>
+          <div class="search-pop" id="globalSearchPop" hidden></div>
+        </div>
+      </div>
+
+      <div class="app-bar-right">
+        <a class="iconbtn" id="langfuseLink" target="_blank" rel="noreferrer" title="Langfuse 可观测性">
+          <svg viewBox="0 0 24 24" class="icon"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M3 12h3l2-7 4 14 2-7 2 4h5"/></svg>
+        </a>
+        <button class="iconbtn" id="themeToggle" title="切换主题">
+          <svg viewBox="0 0 24 24" class="icon" id="themeIcon"><path fill="currentColor" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+        <div id="healthBadge" class="health-badge" title="点击查看详情">
+          <span class="dot"></span><span class="text">检查中</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- 侧边栏 -->
+      <aside class="side-nav">
+        <nav>
+          <a href="#/dashboard" data-route="dashboard" class="nav-item active">
+            <svg viewBox="0 0 24 24" class="icon"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
+            <span>总览</span>
+          </a>
+          <a href="#/incidents" data-route="incidents" class="nav-item">
+            <svg viewBox="0 0 24 24" class="icon"><path fill="currentColor" d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg>
+            <span>故障诊断</span>
+            <span class="nav-badge" id="navPendingCount" hidden>0</span>
+          </a>
+          <a href="#/history" data-route="history" class="nav-item">
+            <svg viewBox="0 0 24 24" class="icon"><path fill="currentColor" d="M13 3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7V3zm-1 4v6l5.25 3.15.75-1.23-4.5-2.67V7H12z"/></svg>
+            <span>故障档案</span>
+          </a>
+          <a href="#/kg" data-route="kg" class="nav-item">
+            <svg viewBox="0 0 24 24" class="icon"><path fill="currentColor" d="M17 16c-.83 0-1.5.67-1.5 1.5S16.17 19 17 19s1.5-.67 1.5-1.5S17.83 16 17 16zM7 16c-.83 0-1.5.67-1.5 1.5S6.17 19 7 19s1.5-.67 1.5-1.5S7.83 16 7 16zm5-13c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zm5 8h-3v3h-4v-3H7c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h10c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1z"/></svg>
+            <span>知识图谱</span>
+          </a>
+          <a href="#/graphrag" data-route="graphrag" class="nav-item">
+            <svg viewBox="0 0 24 24" class="icon"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <span>GraphRAG 调试</span>
+          </a>
+          <a href="#/eval" data-route="eval" class="nav-item">
+            <svg viewBox="0 0 24 24" class="icon"><path fill="currentColor" d="M19 3H5c-1.11 0-2 .89-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.11-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+            <span>评测中心</span>
+          </a>
+        </nav>
+
+        <div class="side-foot">
+          <div class="kbd-hints">
+            <div><kbd>g</kbd><kbd>d</kbd> 总览</div>
+            <div><kbd>g</kbd><kbd>i</kbd> 故障</div>
+            <div><kbd>g</kbd><kbd>e</kbd> 评测</div>
+          </div>
+          <div class="version">v0.7.0 · build {{build}}</div>
+        </div>
+      </aside>
+
+      <!-- 路由出口 -->
+      <main id="view" class="view"></main>
+    </div>
+
+    <!-- Toast 容器 -->
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <!-- Modal 容器 -->
+    <div id="modal-root"></div>
+  </div>
+
+  <script type="module" src="/static/console/js/main.js"></script>
+</body>
+</html>

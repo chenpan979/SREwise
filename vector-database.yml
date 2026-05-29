@@ -1,0 +1,143 @@
+services:
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.18
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  standalone:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v2.5.10
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+    - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - "etcd"
+      - "minio"
+  # 这是新增的 Attu 服务哦！
+  attu:
+    container_name: milvus-attu
+    image: zilliz/attu:v2.5
+    ports:
+      - "8000:3000" # 把本地的 8000 端口映射到容器的 3000 端口 (Attu 默认端口)
+    environment:
+      # MILVUS_URL 指向 Docker 网络里的 Milvus standalone 服务
+      MILVUS_URL: standalone:19530
+    depends_on:
+      - standalone # 确保 Milvus 启动后再启动 Attu
+
+  # SREwise Step 4: Incident Knowledge Graph 后端 (Neo4j Community)
+  # Browser UI: http://localhost:7474  Bolt: bolt://localhost:7687
+  # 默认账号 neo4j / sredemo123 (上线请改环境变量)
+  neo4j:
+    container_name: srewise-neo4j
+    image: neo4j:5.20-community
+    ports:
+      - "7474:7474"  # HTTP / Browser UI
+      - "7687:7687"  # Bolt 协议 (Python driver 用这个)
+    environment:
+      NEO4J_AUTH: "neo4j/sredemo123"
+      # 启用 APOC (常用图算法 / 数据导入工具)
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      NEO4J_server_memory_heap_initial__size: "512m"
+      NEO4J_server_memory_heap_max__size: "1g"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j/data:/data
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j/logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p sredemo123 'RETURN 1' || exit 1"]
+      interval: 30s
+      start_period: 60s
+      timeout: 20s
+      retries: 3
+
+  # SREwise Step 6: Langfuse self-hosted (LLM 可观测性)
+  # UI: http://localhost:3000  注册首个账号即为 owner
+  # 创建 Project → 在 Settings 拿到 PK/SK 填到 .env
+  langfuse-db:
+    container_name: srewise-langfuse-db
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse_pwd_dev
+      POSTGRES_DB: langfuse
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/langfuse-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  langfuse:
+    container_name: srewise-langfuse
+    # 锁定 v2(单容器,只需 postgres,适合本地);v3 需要 clickhouse+redis+minio 太重
+    image: langfuse/langfuse:2
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse_pwd_dev@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: srewise-langfuse-nextauth-secret-change-in-prod
+      SALT: srewise-langfuse-salt-change-in-prod
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      # 关闭注册保护(本地 dev 直接注册)
+      AUTH_DISABLE_SIGNUP: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3000/api/public/health || exit 1"]
+      interval: 30s
+      start_period: 60s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    name: milvus
