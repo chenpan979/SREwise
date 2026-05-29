@@ -12,7 +12,7 @@ import os
 
 from app.config import config
 from loguru import logger
-from app.api import chat, health, file, aiops, sre, eval as eval_api
+from app.api import health, file, sre, eval as eval_api
 from app.core.milvus_client import milvus_manager
 from app.services.incident_kg import incident_kg
 from app.services.incident_kg_seed import seed_if_empty
@@ -94,9 +94,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(health.router, tags=["健康检查"])
-app.include_router(chat.router, prefix="/api", tags=["对话"])
 app.include_router(file.router, prefix="/api", tags=["文件管理"])
-app.include_router(aiops.router, prefix="/api", tags=["AIOps智能运维 (旧)"])
 app.include_router(sre.router, prefix="/api", tags=["SREwise 多 Agent SRE"])
 app.include_router(eval_api.router, prefix="/api", tags=["SREwise Eval"])
 
